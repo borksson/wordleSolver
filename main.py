@@ -1,146 +1,58 @@
-# Score = (freq in letters in words * weight) + (word freq * weight)
 import json
-import string
-
-import numpy as np
-import requests
 import time
-import requests_cache
+import Solver as solver
+from selenium import webdriver
+from selenium.webdriver.common.by import By
+from selenium.webdriver.common.action_chains import ActionChains
+from selenium.webdriver.common.keys import Keys
+from webdriver_manager.chrome import ChromeDriverManager
 
-requests_cache.install_cache()
+with open('selectors.json', 'r') as file:
+    SELECTORS = json.load(file)
 
-_wait = 0.1
+options = webdriver.ChromeOptions()
+options.add_argument('headless')
+options.add_experimental_option("excludeSwitches", ["enable-logging", "disable-default-apps"])
 
-words = {
-    "word": {"freq": 2, "score": 10}
-}
+driver = webdriver.Chrome(ChromeDriverManager().install(), options=options)
 
-letters = {letter: 0 for letter in list(string.ascii_lowercase)}
+driver.get(SELECTORS["sites"]["WORDLE"])
 
-with open("dictSorted.json", "r") as file:
-    possibleWords = json.load(file)
+instructions_close = driver.find_element(By.CSS_SELECTOR, SELECTORS["selectors"]["INSTRUCTIONS_CLOSE"])
+instructions_close.click()
 
+board = driver.find_element(By.CSS_SELECTOR, SELECTORS["selectors"]["BOARD"])
 
-def sigmoid(val, d, c):
-    return 1 / (1 + (np.exp(1) ** (-d * (val - c))))
+rows = board.find_elements(By.XPATH, "./*")
 
+print("NUM ROWS: ", len(rows))
 
-def get_freq(term):
-    response = None
-    while True:
-        try:
-            response = requests.get('https://api.datamuse.com/words?sp=' + term + '&md=f&max=1').json()
-            if not getattr(response, 'from_cache', False):
-                time.sleep(0.1)
-        except:
-            print('Could not get response. Sleep and retry...')
-            time.sleep(_wait)
-            continue
+solver_obj = solver.Solver()
+
+guess = "adieu"
+
+for row in rows:
+    print("GUESS :", guess)
+    ActionChains(driver).send_keys(guess).key_down(Keys.ENTER).perform()
+    time.sleep(2)
+    children = row.find_elements(By.XPATH, "./*")
+    key = []
+    for i in range(len(children)):
+        tile = children[i].find_element(By.XPATH, "./*")
+        state = tile.get_attribute("data-state")
+        if state == "absent":
+            key.append('_')
+        elif state == "correct":
+            key.append(guess[i].upper())
+        elif state == "present":
+            key.append(guess[i])
+    key = ''.join(key)
+    if key == guess.upper():
+        print("ANSWER: ", guess)
         break
-    freq = 0.0 if len(response) == 0 else float(response[0]['tags'][0][2:])
-    return freq
+    guess = [*solver.get_best_guesses(solver_obj.make_guess(guess, key), 1)[0]][0]
 
 
-def calc_letter_freq(words_input, letters_input):
-    for letter in letters_input:
-        freq = 0
-        for word in words_input:
-            freq += word.count(letter)
-        letters_input[letter] = freq
-    return letters_input
+input("Press enter to quit.\n")
 
-
-def calc_word_score(words_input, letters_input):
-    for word in words_input:
-        letter_score = 0
-        r = 0
-        word_no_dups = "".join(set(word))
-        if len(word_no_dups) < len(word):
-            r = -0.01
-        for letter in word_no_dups:
-            letter_score += letters_input[letter]
-        if words_input[word]["freq"] == 0:
-            words_input[word]["freq"] = get_freq(word)
-        words_input[word]["score"] = sigmoid(words_input[word]["freq"], 0.00005, 1863) + sigmoid(letter_score, 0.002,
-                                                                                                 800) + r
-    return words_input
-
-
-def get_best_guesses(words_input, num_guesses):
-    index = 0
-    top_scores = [val['score'] for val in words_input.values()]
-    top_scores.sort(reverse=True)
-    top_scores = top_scores[0:num_guesses]
-    best_guesses = []
-    for score in top_scores:
-        best_guesses.append({[word for (word, value) in words_input.items() if value['score'] == score][0]: score})
-    return best_guesses
-
-
-def does_match_key(word, guess, word_key):
-    for letter in word_key:
-        letter = letter.lower()
-        if letter != '_':
-            if word.count(letter) < word_key.lower().count(letter) or word.count(letter) == 0:
-                return False
-    for i in range(len(word)):
-        if word_key[i] != '_':
-            if word_key[i].islower():
-                if word_key[i] == word[i]:
-                    return False
-            if word_key[i].isupper():
-                if word_key[i].lower() != word[i]:
-                    return False
-        else:
-            if word.count(guess[i]) != 0 and word_key.lower().count(guess[i]) == 0:
-                return False
-            elif word.count(guess[i]) < word_key.lower().count(guess[i]):
-                return False
-    return True
-
-
-def make_guess(guess, word_key, words_input):
-    try:
-        words_input.pop(guess)
-    except:
-        print("Not in current word list.")
-    cpy = words_input.copy()
-    for word in cpy:
-        if not does_match_key(word, guess, word_key):
-            words_input.pop(word)
-    return words_input
-
-
-def add_word(word, words_input):
-    try:
-        words_input[word]
-    except:
-        print("Adding word: ", word)
-        words_input[word] = {"freq": 0, "score": 0}
-
-# max: 1375 min: 37
-letters = calc_letter_freq(possibleWords, letters)
-# max: 3726 min: 0
-possibleWords = calc_word_score(possibleWords, letters)
-# Init game
-while (True):
-    print("Best guesses: ", get_best_guesses(possibleWords, 5))
-    while (True):
-        guess = input("Guessed word: ")
-        if (len(guess) != 5) or guess.count('_')>0:
-            print("Not a 5 letter word.")
-        else:
-            break
-    while (True):
-        word_key = input("Word key: ")
-        if (len(word_key) != 5):
-            print("Not a 5 letter word key.")
-        else:
-            break
-    possibleWords = make_guess(guess, word_key, possibleWords)
-
-# For each round input guessed word in this format:
-# spite was guessed, and p and e are in the word, I is in the correct location
-
-with open("dictSorted.json", "w") as file:
-    file.write(json.dumps(possibleWords))
+driver.quit()

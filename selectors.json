@@ -1,0 +1,9 @@
+{
+  "sites": {
+    "WORDLE": "https://www.nytimes.com/games/wordle/index.html"
+  },
+  "selectors": {
+    "INSTRUCTIONS_CLOSE": "#wordle-app-game > div.Modal-module_modalOverlay__81ZCi.Modal-module_enableAuth__SR682 > div > div > svg",
+    "BOARD": "#wordle-app-game > div.Board-module_boardContainer__cKb-C > div"
+  }
+}
